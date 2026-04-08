@@ -1,6 +1,6 @@
 const express = require('express');
 const cors = require('cors');
-const fetch = require('node-fetch');
+const https = require('https');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -8,28 +8,42 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-// Route proxy vers Anthropic
-app.post('/api/messages', async (req, res) => {
-  try {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': process.env.ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01'
-      },
-      body: JSON.stringify(req.body)
-    });
+app.post('/api/messages', (req, res) => {
+  const body = JSON.stringify(req.body);
 
-    const data = await response.json();
-    res.json(data);
-  } catch (error) {
-    console.error('Erreur API:', error);
+  const options = {
+    hostname: 'api.anthropic.com',
+    path: '/v1/messages',
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': process.env.ANTHROPIC_API_KEY,
+      'anthropic-version': '2023-06-01',
+      'Content-Length': Buffer.byteLength(body)
+    }
+  };
+
+  const apiReq = https.request(options, (apiRes) => {
+    let data = '';
+    apiRes.on('data', chunk => data += chunk);
+    apiRes.on('end', () => {
+      try {
+        res.json(JSON.parse(data));
+      } catch(e) {
+        res.status(500).json({ error: 'Erreur parsing réponse' });
+      }
+    });
+  });
+
+  apiReq.on('error', (e) => {
+    console.error('Erreur requête:', e);
     res.status(500).json({ error: 'Erreur serveur' });
-  }
+  });
+
+  apiReq.write(body);
+  apiReq.end();
 });
 
-// Health check
 app.get('/', (req, res) => {
   res.json({ status: 'RH·IA Backend opérationnel ✅' });
 });
